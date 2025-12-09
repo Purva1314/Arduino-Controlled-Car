@@ -1,0 +1,85 @@
+#include <SPI.h>
+#include "RF24.h"
+#include "Wire.h"
+
+// Define nRF24L01 pins
+#define CE_PIN   9
+#define CSN_PIN  10
+RF24 radio(CE_PIN, CSN_PIN); // Create RF24 object
+
+// Define the address for communication (must match the receiver)
+const byte addresses[][6] = {"00001", "00002"};
+
+// MPU6050 I2C address
+const int MPU_addr = 0x68;
+int16_t AccX, AccY, AccZ;
+
+// Global variable to hold the command
+char command = 'S'; // 'S' for Stop by default
+
+void setup() {
+  Serial.begin(9600);
+  
+  // MPU6050 Initialization
+  Wire.begin();
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B); // PWR_MGMT_1 register
+  Wire.write(0);    // set to zero (wakes up MPU-6050)
+  Wire.endTransmission(true);
+
+  // nRF24L01 Initialization
+  if (!radio.begin()) {
+    Serial.println("nRF24L01 initialization failed.");
+    while (1);
+  }
+  radio.setPALevel(RF24_PA_LOW); 
+  radio.openWritingPipe(addresses[0]); // Use the first address
+  radio.stopListening(); // We are the transmitter
+  Serial.println("Transmitter Ready.");
+}
+
+void readMPU() {
+  // Read MPU6050 data
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x3B); // starting with register 0x3B (ACCEL_XOUT_H)
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_addr, 6, true); // read 6 bytes
+  AccX = Wire.read() << 8 | Wire.read(); // X-axis acceleration
+  AccY = Wire.read() << 8 | Wire.read(); // Y-axis acceleration
+  AccZ = Wire.read() << 8 | Wire.read(); // Z-axis acceleration
+}
+
+void loop() {
+  readMPU();
+
+  // --- Gesture Interpretation (Adjust these thresholds for your glove) ---
+  // The MPU6050 gives readings around -17000 to +17000 for full tilt
+  
+  // Forward (Tilt hand down - AccX is negative)
+  if (AccX < -4000) {
+    command = 'F';
+  }
+  // Backward (Tilt hand up - AccX is positive)
+  else if (AccX > 4000) {
+    command = 'B';
+  }
+  // Left (Tilt hand left - AccY is positive)
+  else if (AccY > 4000) {
+    command = 'L';
+  }
+  // Right (Tilt hand right - AccY is negative)
+  else if (AccY < -4000) {
+    command = 'R';
+  }
+  // Stop (Hand flat/level)
+  else {
+    command = 'S';
+  }
+  
+  // Send the command
+  radio.write(&command, sizeof(command));
+  Serial.print("Sent: ");
+  Serial.println(command);
+
+  delay(50); // Small delay before the next reading
+}
