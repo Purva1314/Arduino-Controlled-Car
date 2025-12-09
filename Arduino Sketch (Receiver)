@@ -1,0 +1,133 @@
+#include <SPI.h>
+#include "RF24.h"
+
+// L298N Motor Driver Pins
+#define IN1 4 // Motor 1 (Right) Forward
+#define IN2 5 // Motor 1 (Right) Backward
+#define IN3 6 // Motor 2 (Left) Forward
+#define IN4 7 // Motor 2 (Left) Backward
+#define ENA 8 // Enable Pin for Motor 1 (PWM)
+#define ENB 11 // Enable Pin for Motor 2 (PWM)
+
+int motorSpeed = 200; // Adjust speed (0-255)
+
+// Define nRF24L01 pins
+#define CE_PIN   9
+#define CSN_PIN  10
+RF24 radio(CE_PIN, CSN_PIN);
+
+// Define the address for communication (must match the transmitter)
+const byte addresses[][6] = {"00001", "00002"};
+
+// Variable to store the received command
+char receivedCommand = 'S';
+
+void moveForward() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, motorSpeed); // Right Motor
+  
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENB, motorSpeed); // Left Motor
+}
+
+void moveBackward() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  analogWrite(ENA, motorSpeed);
+  
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  analogWrite(ENB, motorSpeed);
+}
+
+void turnLeft() {
+  digitalWrite(IN1, HIGH); // Right Motor Forward
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, motorSpeed);
+  
+  digitalWrite(IN3, LOW);  // Left Motor Stop/Slow
+  digitalWrite(IN4, LOW);
+  analogWrite(ENB, 0); // Can also try slow reverse for tighter turn
+}
+
+void turnRight() {
+  digitalWrite(IN1, LOW); // Right Motor Stop/Slow
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+  
+  digitalWrite(IN3, HIGH); // Left Motor Forward
+  digitalWrite(IN4, LOW);
+  analogWrite(ENB, motorSpeed);
+}
+
+void stopCar() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 0);
+  
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENB, 0);
+}
+
+void setup() {
+  Serial.begin(9600);
+  
+  // Motor Pin Setup
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  
+  stopCar(); // Ensure car is stopped on startup
+
+  // nRF24L01 Initialization
+  if (!radio.begin()) {
+    Serial.println("nRF24L01 initialization failed.");
+    while (1);
+  }
+  radio.setPALevel(RF24_PA_LOW);
+  radio.openReadingPipe(1, addresses[0]); // Listen on the same address
+  radio.startListening(); // We are the receiver
+  Serial.println("Receiver Ready.");
+}
+
+void loop() {
+  if (radio.available()) {
+    // Read the command from the transmitter
+    radio.read(&receivedCommand, sizeof(receivedCommand));
+    Serial.print("Received: ");
+    Serial.println(receivedCommand);
+    
+    // Execute the action based on the received command
+    switch (receivedCommand) {
+      case 'F':
+        moveForward();
+        break;
+      case 'B':
+        moveBackward();
+        break;
+      case 'L':
+        turnLeft();
+        break;
+      case 'R':
+        turnRight();
+        break;
+      case 'S':
+      default: // If connection is lost or unknown command
+        stopCar();
+        break;
+    }
+  } else {
+    // If no data is received for a moment, stop the car as a safety measure
+    // Note: Uncommenting this can make control choppy if delay is too long
+    // stopCar(); 
+  }
+
+  // Small delay is helpful but not always necessary on the receiver
+  delay(10); 
+}
